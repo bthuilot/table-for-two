@@ -4,13 +4,14 @@
 # GPL-3.0 License
 #
 # booker.rb - A script to book a reservation on Resy
-# Usage: ruby booker.rb --book-time "2024-01-01 12:00:00" --date "2024-01-01" --venue-url "https://resy.com/venue" --party-size 2
+# Usage: ruby booker.rb --book-time "12:00PM" --date "2024-01-01" --venue-url "https://resy.com/venue" --party-size 2
 # Command Line Options:
-#   --book_time: The time to book the reservation
 #   --date: The date of the reservation
 #   --venue_url: The URL of the venue
 #   --party_size: The size of the party
-#
+#   --book_time (optional): The time to begin running the program at.
+#     Will wait until this time in EST and then begin gathering reservations
+
 # Environment Variables:
 #   DRY_RUN: Enable dry run mode, does not book reservation
 #   HEADLESS: Enable headless mode, does not open browser window
@@ -60,7 +61,10 @@ def main
   venue_url.query = nil # remove query params from venue url
 
   # parse book time to a Time object
-  book_time = Time.parse(options[:book_time])
+  book_time = nil
+  if options.key?(:book_time)
+    book_time = Time.parse(options[:book_time])
+  end
   # parse date to a Time object
   date = Time.parse(options[:date])
   # parse party size to an integer
@@ -71,7 +75,7 @@ def main
 
   puts "logging in"
   login(driver, date, party_size)
-  
+
   wait_until(book_time)
 
   puts "beginning reservation booking for venue: #{venue_url}"
@@ -88,12 +92,16 @@ def main
 end
 
 # Waits for SLEEP_TIME seconds
-def wait
-  sleep SLEEP_TIME
+def wait(amt=SLEEP_TIME)
+  sleep amt
 end
 
 # Waits until the given time
 def wait_until(time)
+  if time == nil
+    return
+  end
+
   $logger.info("waiting until #{time}")
   diff = time - Time.now
   if diff > 0
@@ -115,7 +123,7 @@ def parse_args
   end.parse!
 
   $logger.debug("options: #{options}")
-  required_options = [:book_time, :date, :venue_url, :party_size]
+  required_options = [:date, :venue_url, :party_size]
   required_options.each do |opt|
     raise OptionParser::MissingArgument, "missing required option: #{opt}" if options[opt].nil?
   end
@@ -152,6 +160,7 @@ def login(driver, date, party_size)
     .send_keys(PASSWORD)
   driver.find_element(:xpath, '//form[@name="login_form"]').submit
   $logger.info("logged in")
+  wait(2)
 end
 
 
@@ -173,7 +182,7 @@ def book_reservation(driver, venue_url, date, party_size)
     slots = driver.find_elements(:xpath, '//button[contains(@class, "ReservationButton")]')
     
     booked = false
-    slots.each do |slot|
+    slots.shuffle.each do |slot|
       if slot.text == "Notify"
         next
       end
@@ -195,6 +204,10 @@ def book_reservation(driver, venue_url, date, party_size)
         break
       rescue => e
         $logger.error("error booking slot: #{e}")
+        print "awaiting confirmation for next booking (type c to exit): "
+        if STDIN.gets.chomp == 'c'
+          break
+        end
         next
       end
     end
